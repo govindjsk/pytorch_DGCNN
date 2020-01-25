@@ -10,7 +10,7 @@ import pdb
 import argparse
 
 cmd_opt = argparse.ArgumentParser(description='Argparser for graph_classification')
-cmd_opt.add_argument('-mode', default='cpu', help='cpu/gpu')
+cmd_opt.add_argument('-mode', default='gpu', help='cpu/gpu')
 cmd_opt.add_argument('-gm', default='DGCNN', help='gnn model to use')
 cmd_opt.add_argument('-data', default=None, help='data folder name')
 cmd_opt.add_argument('-batch_size', type=int, default=50, help='minibatch size')
@@ -29,6 +29,7 @@ cmd_opt.add_argument('-hidden', type=int, default=100, help='dimension of mlp hi
 cmd_opt.add_argument('-max_lv', type=int, default=4, help='max rounds of message passing')
 cmd_opt.add_argument('-learning_rate', type=float, default=0.0001, help='init learning_rate')
 cmd_opt.add_argument('-dropout', type=bool, default=False, help='whether add dropout after dense layer')
+cmd_opt.add_argument('-dropout_prob', type=float, default=0.5, help='dropout prob')
 cmd_opt.add_argument('-printAUC', type=bool, default=False, help='whether to print AUC (for binary classification only)')
 cmd_opt.add_argument('-extract_features', type=bool, default=False, help='whether to extract final graph features')
 
@@ -37,6 +38,7 @@ cmd_args, _ = cmd_opt.parse_known_args()
 cmd_args.latent_dim = [int(x) for x in cmd_args.latent_dim.split('-')]
 if len(cmd_args.latent_dim) == 1:
     cmd_args.latent_dim = cmd_args.latent_dim[0]
+
 
 class GNNGraph(object):
     def __init__(self, g, label, node_tags=None, node_features=None):
@@ -51,6 +53,7 @@ class GNNGraph(object):
         self.label = label
         self.node_features = node_features  # numpy array (node_num * feature_dim)
         self.degs = list(dict(g.degree).values())
+        self.nodes = g.nodes()
 
         if len(g.edges()) != 0:
             x, y = zip(*g.edges())
@@ -78,6 +81,53 @@ class GNNGraph(object):
                 self.edge_features.append(edge_features[edge])  # add reversed edges
             self.edge_features = np.concatenate(self.edge_features, 0)
 
+    
+class HGNNHypergraph(object):
+    def __init__(self, S, label, node_tags=None, node_features=None, edge_features = None):
+        '''
+            S: a nodes x hyperedges incidence matrix of hypergraph
+            label: an integer hypergraph label
+            node_tags: a list of integer node tags
+            node_features: a numpy array of continuous node features
+        '''
+        self.S = S
+        self.num_nodes = len(node_tags)
+        self.node_tags = node_tags
+        self.label = label
+        self.node_features = node_features  # numpy array (node_num * feature_dim)
+        self.hdegs = np.array(S.sum(axis=1)).ravel()
+        self.hyperedge_sizes = np.array(S.sum(axis=0)).ravel()
+        self.edge_features = edge_features # This is the same as hyperedge tags (labels)
+        
+class HGNNBihypergraph(object):
+    def __init__(self, S, S_, B, label, node_tags, node_tags_, node_features, node_features_):
+        '''
+            S: a n x m incidence matrix of first node hypergraph,
+               where |V| = n, and m is the number of ``active'' hyperedges
+            S_: a n' x m' incidence matrix of second node hypergraph,
+                where |V'| = n', and m' is the number of ``active'' hyperedges
+            B: a m x m' biadjacency matrix of first-node-hyperedges x second-node-hyperedges
+            label: an integer bihypergraph label corresponding to the pair i, j in question
+            node_tags: a list of integer node tags
+            node_features: a numpy array of continuous node features
+        '''
+        self.S = S
+        self.S_ = S_
+        self.B = B
+        self.n = S.shape[0]
+        self.n_ = S_.shape[0]
+        self.label = label
+        self.num_nodes = self.n
+        self.num_nodes_ = self.n_
+        self.hdegs = np.array(S.sum(axis=1)).ravel()
+        self.hdegs_ = np.array(S_.sum(axis=1)).ravel()
+        self.hyperedge_sizes = np.array(S.sum(axis=0)).ravel()
+        self.hyperedge_sizes_ = np.array(S_.sum(axis=0)).ravel()
+        self.node_tags = node_tags
+        self.node_tags_ = node_tags_
+        self.node_features = node_features  # numpy array (node_num * feature_dim)
+        self.node_features_ = node_features_
+        self.edge_features = None
 
 def load_data():
 

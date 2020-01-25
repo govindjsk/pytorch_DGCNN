@@ -49,10 +49,12 @@ class Classifier(nn.Module):
         else:
             labels = torch.LongTensor(len(batch_graph))
         n_nodes = 0
+        n_nodes_ = 0
 
-        if batch_graph[0].node_tags is not None:
+        if batch_graph[0].node_tags is not None and batch_graph[0].node_tags_ is not None:
             node_tag_flag = True
             concat_tag = []
+            concat_tag_ = []
         else:
             node_tag_flag = False
 
@@ -71,8 +73,10 @@ class Classifier(nn.Module):
         for i in range(len(batch_graph)):
             labels[i] = batch_graph[i].label
             n_nodes += batch_graph[i].num_nodes
+            n_nodes_ += batch_graph[i].num_nodes_
             if node_tag_flag == True:
                 concat_tag += batch_graph[i].node_tags
+                concat_tag_ += batch_graph[i].node_tags_
             if node_feat_flag == True:
                 tmp = torch.from_numpy(batch_graph[i].node_features).type('torch.FloatTensor')
                 concat_feat.append(tmp)
@@ -85,6 +89,10 @@ class Classifier(nn.Module):
             concat_tag = torch.LongTensor(concat_tag).view(-1, 1)
             node_tag = torch.zeros(n_nodes, cmd_args.feat_dim)
             node_tag.scatter_(1, concat_tag, 1)
+            
+            concat_tag_ = torch.LongTensor(concat_tag_).view(-1, 1)
+            node_tag_ = torch.zeros(n_nodes_, cmd_args.feat_dim)
+            node_tag_.scatter_(1, concat_tag_, 1)
 
         if node_feat_flag == True:
             node_feat = torch.cat(concat_feat, 0)
@@ -94,6 +102,7 @@ class Classifier(nn.Module):
             node_feat = torch.cat([node_tag.type_as(node_feat), node_feat], 1)
         elif node_feat_flag == False and node_tag_flag == True:
             node_feat = node_tag
+            node_feat_ = node_tag_
         elif node_feat_flag == True and node_tag_flag == False:
             pass
         else:
@@ -104,38 +113,40 @@ class Classifier(nn.Module):
 
         if cmd_args.mode == 'gpu':
             node_feat = node_feat.cuda()
+            node_feat_ = node_feat_.cuda()
             labels = labels.cuda()
             if edge_feat_flag == True:
                 edge_feat = edge_feat.cuda()
 
         if edge_feat_flag == True:
-            return node_feat, edge_feat, labels
-        return node_feat, labels
+            return node_feat, node_feat_, edge_feat, labels
+        return node_feat, node_feat_, labels
 
     def forward(self, batch_graph):
         feature_label = self.PrepareFeatureLabel(batch_graph)
-        if len(feature_label) == 2:
-            node_feat, labels = feature_label
+        if len(feature_label) == 3:
+            node_feat, node_feat_, labels = feature_label
             edge_feat = None
-        elif len(feature_label) == 3:
-            node_feat, edge_feat, labels = feature_label
-        embed = self.gnn(batch_graph, node_feat, edge_feat)
+        elif len(feature_label) == 4:
+            node_feat, node_feat_, edge_feat, labels = feature_label
+        embed = self.gnn(batch_graph, node_feat, node_feat_, edge_feat)
         return self.mlp(embed, labels)
 
     def output_features(self, batch_graph):
         feature_label = self.PrepareFeatureLabel(batch_graph)
-        if len(feature_label) == 2:
-            node_feat, labels = feature_label
+        if len(feature_label) == 3:
+            node_feat, node_feat_, labels = feature_label
             edge_feat = None
-        elif len(feature_label) == 3:
-            node_feat, edge_feat, labels = feature_label
-        embed = self.gnn(batch_graph, node_feat, edge_feat)
+        elif len(feature_label) == 4:
+            node_feat, node_feat_, edge_feat, labels = feature_label
+        embed = self.gnn(batch_graph, node_feat, node_feat_, edge_feat)
         return embed, labels
         
 
 def loop_dataset(g_list, classifier, sample_idxes, optimizer=None, bsize=cmd_args.batch_size):
     total_loss = []
-    total_iters = (len(sample_idxes) + (bsize - 1) * (optimizer is None)) // bsize
+    total_iters = (len(sample_idxes) + (bsize - 1) * (optimizer is None)) // bsize 
+    #total_iters = 1
     pbar = tqdm(range(total_iters), unit='batch')
     all_targets = []
     all_scores = []
